@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Five Nights at Yoyle City — Night 1</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000; overflow: hidden;
+    font-family: "Courier New", monospace;
+    color: #ddd;
+  }
+  #wrap {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas {
+    display: block;
+    max-width: 100vw; max-height: 100vh;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    image-rendering: pixelated;
+  }
+  .screen {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #050505;
+    padding: 40px;
+    text-align: center;
+  }
+  .screen h1 {
+    font-size: clamp(28px, 5vw, 64px);
+    letter-spacing: 4px;
+    margin-bottom: 10px;
+    text-shadow: 0 0 20px #a00;
+  }
+  .screen h2 {
+    font-size: clamp(14px, 1.6vw, 20px);
+    color: #666;
+    letter-spacing: 2px;
+    margin-bottom: 40px;
+  }
+  .screen p {
+    font-size: clamp(13px, 1.3vw, 18px);
+    max-width: 780px;
+    line-height: 1.6;
+    white-space: pre-line;
+    color: #bbb;
+  }
+  .screen button {
+    margin-top: 30px;
+    padding: 14px 44px;
+    background: #1a1a1a;
+    color: #eee;
+    border: 2px solid #444;
+    font-family: inherit;
+    font-size: 16px;
+    letter-spacing: 3px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  .screen button:hover {
+    background: #300;
+    border-color: #a00;
+    color: #fff;
+  }
+  .nightGrid {
+    display: flex; gap: 14px; flex-wrap: wrap;
+    justify-content: center; max-width: 1000px;
+  }
+  .nightBtn {
+    width: 160px;
+    padding: 20px 10px;
+    background: #0d0d0d;
+    border: 2px solid #333;
+    color: #ddd;
+    font-family: inherit;
+    cursor: pointer;
+    transition: 0.15s;
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .nightBtn .nTitle { display: block; font-size: 12px; color: #999; margin-top: 6px; }
+  .nightBtn .nStatus { display: block; font-size: 10px; margin-top: 8px; color: #c55; }
+  .nightBtn:not(:disabled):hover { background: #200; border-color: #a00; color: #fff; }
+  .nightBtn:disabled { opacity: 0.55; cursor: default; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="game" width="1280" height="720"></canvas>
+</div>
+
+<!-- MENU -->
+<div class="screen" id="menuScreen">
+  <h1>FIVE NIGHTS AT YOYLE CITY</h1>
+  <h2>a survival horror</h2>
+  <div class="nightGrid" id="nightGrid"></div>
+</div>
+
+<!-- SLIDESHOW -->
+<div class="screen" id="slideScreen" style="display:none">
+  <h1 id="slideTitle"></h1>
+  <p id="slideText"></p>
+  <button id="slideBtn">NEXT</button>
+</div>
+
+<script>
+"use strict";
+
+// =====================================================
+//  CONFIG
+// =====================================================
+const CONFIG = {
+  SHIFT_DURATION: 360,
+  PHASE_LENGTH:   120,
+  STARTING_ENERGY: 3500,
+
+  DOOR_COST:      [0, 1, 2, 5, 10],
+  CAMERA_COST:    10,
+  CAM_SWAP_COST:  2,
+  CAMS_LIGHT_P3:  1,
+  COINY_LAPTOP:   5,
+  EXPLOSION_COST: 10,
+  SHOCK_COST:     10,
+
+  AIR_MAX:        100,
+  AIR_DRAIN:      100 / 3,
+  AIR_REFILL:     50,
+
+  PENCIL_MOVE:    4,
+  PENCIL_GRACE:   2,
+  PENCIL_BANISH:  5,
+
+  LEAFY_MOVE:     2,
+  LEAFY_GRACE_P2: 5,
+  LEAFY_GRACE_P3: 1,
+  LEAFY_BANISH:   7,
+
+  COINY_MIN_EXP:  0.75,
+  COINY_MAX_EXP:  1.5,
+  COINY_OFF:      10,
+  COINY_MAX_ROW:  5,
+
+  PEN_INTERVAL:   { 1: [9, 12], 2: [7, 10], 3: [7, 10] },
+  PEN_WARNING:    3,
+  PEN_LEAVE:      1,
+};
+
+// =====================================================
+//  SPRITE LOADER
+// =====================================================
+const SPRITE_PATHS = {
+  office_base:   "assets/office_base.png",
+  office_dark:   "assets/office_dark.png",
+  office_zap:    "assets/office_zap.png",
+  cam1_light:    "assets/cam1_light.png",
+  cam1_flicker:  "assets/cam1_flicker.png",
+  cam2_light:    "assets/cam2_light.png",
+  cam2_flicker:  "assets/cam2_flicker.png",
+  cam3_light:    "assets/cam3_light.png",
+  pencil_camera: "assets/pencil_camera.png",
+  pencil_office: "assets/pencil_office.png",
+  pencil_shock:  "assets/pencil_shocked.png",
+  leafy_camera:  "assets/leafy_camera.png",
+  leafy_office:  "assets/leafy_office.png",
+  coiny_p1:      "assets/coiny_phase1.png",
+  coiny_p23:     "assets/coiny_phase23.png",
+  door_intact:   "assets/door_intact.png",
+  door_dmg1:     "assets/door_damage1.png",
+  door_dmg2:     "assets/door_damage2.png",
+};
+const sprites = {};
+for (const key in SPRITE_PATHS) {
+  const img = new Image();
+  img._ok = false;
+  img.onload  = () => { img._ok = true; };
+  img.onerror = () => { img._ok = false; };
+  img.src = SPRITE_PATHS[key];
+  sprites[key] = img;
+}
+function hasSprite(k) { const s = sprites[k]; return s && s._ok; }
+function blit(k, x, y, w, h) {
+  if (!hasSprite(k)) return false;
+  ctx.drawImage(sprites[k], x, y, w, h);
+  return true;
+}
+
+// =====================================================
+//  CANVAS
+// =====================================================
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+
+// =====================================================
+//  STATE
+// =====================================================
+function newState() {
+  return {
+    running: false,
+    paused: false,
+    gameOver: false,
+    won: false,
+    gameTime: 0,
+    phase: 1,
+
+    energy: CONFIG.STARTING_ENERGY,
+    air: CONFIG.AIR_MAX,
+
+    isCamOpen: false,
+    currentCam: 1,
+
+    leftClosed:  false,
+    rightClosed: false,
+    leftDamage:  0,
+    rightDamage: 0,
+
+    ventSealed: false,
+
+    pencilPos: 0,
+    pencilSide: null,
+    pencilMoveT: 0,
+    pencilDoorT: 0,
+    pencilBanishedT: 0,
+    pencilShockFlash: 0,
+
+    leafyPos: 0,
+    leafySide: null,
+    leafyMoveT: 0,
+    leafyDoorT: 0,
+    leafyBanishedT: 0,
+
+    coinyExpT: 0,
+    coinyExpRow: 0,
+    coinyOffT: 0,
+    coinyFlickerT: 0,
+    coinyFlashT: 0,
+
+    penTimer: 0,
+    penWarningT: 0,
+    penSealedT: 0,
+
+    zapFlashT: 0,
+    zapSide: null,
+    shakeT: 0,
+
+    msg: "",
+    msgT: 0,
+  };
+}
+let S = null;
+
+// =====================================================
+//  HELPERS
+// =====================================================
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+function setMsg(text, secs = 2) {
+  S.msg = text;
+  S.msgT = secs;
+}
+
+function jumpScare(text) {
+  S.gameOver = true;
+  S.running = false;
+  S.msg = text;
+  S.shakeT = 2;
+}
+
+// =====================================================
+//  PLACEHOLDER SHAPES
+// =====================================================
+function drawPencilShape(cx, cy, scale = 1) {
+  const w = 40 * scale, h = 180 * scale;
+  ctx.fillStyle = "#e8c824";
+  ctx.fillRect(cx - w/2, cy - h/2 + 30*scale, w, h - 60*scale);
+  ctx.fillStyle = "#999";
+  ctx.fillRect(cx - w/2, cy + h/2 - 40*scale, w, 12*scale);
+  ctx.fillStyle = "#e88";
+  ctx.fillRect(cx - w/2, cy + h/2 - 28*scale, w, 20*scale);
+  ctx.fillStyle = "#f5e8a0";
+  ctx.beginPath();
+  ctx.moveTo(cx - w/2, cy - h/2 + 30*scale);
+  ctx.lineTo(cx, cy - h/2);
+  ctx.lineTo(cx + w/2, cy - h/2 + 30*scale);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.arc(cx - 8*scale, cy - 30*scale, 4*scale, 0, Math.PI*2);
+  ctx.arc(cx + 8*scale, cy - 30*scale, 4*scale, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawLeafyShape(cx, cy, scale = 1) {
+  const rx = 55*scale, ry = 95*scale;
+  ctx.fillStyle = "#3a9a3a";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = "#1a4a1a";
+  ctx.lineWidth = 3*scale;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - ry + 10*scale);
+  ctx.lineTo(cx, cy + ry - 10*scale);
+  ctx.stroke();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.arc(cx - 14*scale, cy - 20*scale, 6*scale, 0, Math.PI*2);
+  ctx.arc(cx + 14*scale, cy - 20*scale, 6*scale, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 2*scale;
+  ctx.beginPath();
+  ctx.arc(cx, cy + 20*scale, 12*scale, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+}
+
+function drawCoinyShape(cx, cy, phase) {
+  ctx.fillStyle = "#d4a020";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 60, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = "#8a6010";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.arc(cx - 15, cy - 10, 6, 0, Math.PI*2);
+  ctx.arc(cx + 15, cy - 10, 6, 0, Math.PI*2);
+  ctx.fill();
+  if (phase >= 2) {
+    ctx.fillStyle = "#222";
+    ctx.fillRect(cx - 55, cy + 40, 110, 30);
+    ctx.fillStyle = "#0a4a0a";
+    ctx.fillRect(cx - 50, cy + 45, 100, 20);
+    if (Math.floor(performance.now() / 200) % 2 === 0) {
+      ctx.fillStyle = "#f44";
+      ctx.beginPath();
+      ctx.arc(cx + 40, cy + 55, 3, 0, Math.PI*2);
+      ctx.fill();
+    }
+  } else {
+    ctx.fillStyle = "#5a2a1a";
+    ctx.fillRect(cx - 100, cy + 45, 200, 60);
+  }
+}
+
+function drawDoorVisual(side) {
+  const s = S;
+  const x = side === "left" ? 90 : W - 90 - 260;
+  const y = 160, w = 260, h = 460;
+  const dmg = side === "left" ? s.leftDamage : s.rightDamage;
+  const closed = side === "left" ? s.leftClosed : s.rightClosed;
+
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(x, y, w, h);
+
+  if (dmg >= 3) {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "#3a3a3a";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let i = 0; i <= 10; i++) {
+      const px = x + (i % 2 ? 18 : 2);
+      const py = y + h * i / 10;
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#666";
+    ctx.font = "bold 18px 'Courier New'";
+    ctx.fillText("BROKEN", x + 80, y + h/2);
+    return;
+  }
+
+  if (closed) {
+    const key = dmg === 0 ? "door_intact" : (dmg === 1 ? "door_dmg1" : "door_dmg2");
+    if (blit(key, x, y, w, h)) { /* done */ }
+    else {
+      ctx.fillStyle = "#4a4a52";
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = "#2a2a30";
+      ctx.lineWidth = 2;
+      for (let i = 1; i < 6; i++) {
+        ctx.beginPath();
+        ctx.moveTo(x, y + h * i / 6);
+        ctx.lineTo(x + w, y + h * i / 6);
+        ctx.stroke();
+      }
+    }
+    if (dmg >= 1) {
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + 40, y + 80);
+      ctx.lineTo(x + 90, y + 180);
+      ctx.lineTo(x + 60, y + 260);
+      ctx.stroke();
+    }
+    if (dmg >= 2) {
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(x + w - 40, y + 130);
+      ctx.lineTo(x + w - 100, y + 240);
+      ctx.lineTo(x + w - 50, y + 360);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#cfc";
+    ctx.font = "bold 14px 'Courier New'";
+    ctx.fillText("CLOSED (L" + dmg + ")", x + 60, y + h - 20);
+  } else {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "#444";
+    ctx.font = "14px 'Courier New'";
+    ctx.fillText("OPEN", x + 100, y + h - 20);
+  }
+}
+
+// =====================================================
+//  DRAW OFFICE
+// =====================================================
+function drawOffice() {
+  const s = S;
+  const blackout = s.phase === 3;
+  const zapActive = s.zapFlashT > 0;
+
+  let bgKey = "office_base";
+  if (blackout) bgKey = zapActive ? "office_zap" : "office_dark";
+
+  if (!blit(bgKey, 0, 0, W, H)) {
+    ctx.fillStyle = zapActive ? "#3a3a4a" : (blackout ? "#050505" : "#141418");
+    ctx.fillRect(0, 0, W, H);
+    if (!blackout) {
+      ctx.fillStyle = "#2a1e12";
+      ctx.fillRect(W/2 - 320, H - 220, 640, 220);
+      ctx.fillStyle = "#0a1a2a";
+      ctx.fillRect(W/2 - 110, H - 320, 220, 130);
+      ctx.fillStyle = "#2a5a8a";
+      ctx.fillRect(W/2 - 100, H - 310, 200, 110);
+    } else if (!zapActive) {
+      ctx.fillStyle = "rgba(40, 90, 160, 0.35)";
+      ctx.beginPath();
+      ctx.arc(W/2, H - 260, 130, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  drawDoorVisual("left");
+  drawDoorVisual("right");
+
+  // Vent
+  ctx.fillStyle = s.ventSealed ? "#666" : "#000";
+  ctx.fillRect(W/2 - 70, 40, 140, 50);
+  ctx.strokeStyle = "#444";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W/2 - 70, 40, 140, 50);
+  ctx.fillStyle = s.ventSealed ? "#eee" : "#666";
+  ctx.font = "bold 14px 'Courier New'";
+  ctx.fillText(s.ventSealed ? "VENT SEALED" : "VENT OPEN", W/2 - 45, 70);
+
+  if (s.pencilPos === 3 && s.pencilSide) {
+    const cx = s.pencilSide === "left" ? 220 : W - 220;
+    if (s.pencilShockFlash > 0) {
+      if (!blit("pencil_shock", cx - 100, 260, 200, 320)) {
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(cx - 60, 300, 120, 260);
+        ctx.strokeStyle = "#0ff";
+        ctx.lineWidth = 4;
+        for (let i = 0; i < 6; i++) {
+          ctx.beginPath();
+          const a = Math.random() * Math.PI * 2;
+          ctx.moveTo(cx, 420);
+          ctx.lineTo(cx + Math.cos(a) * 100, 420 + Math.sin(a) * 100);
+          ctx.stroke();
+        }
+      }
+    } else if (!blit("pencil_office", cx - 100, 260, 200, 320)) {
+      drawPencilShape(cx, 420, 0.9);
+    }
+  }
+
+  if (s.leafyPos === 3 && s.leafySide) {
+    const cx = s.leafySide === "left" ? 220 : W - 220;
+    if (!blit("leafy_office", cx - 100, 260, 200, 320)) {
+      drawLeafyShape(cx, 420, 0.9);
+    }
+  }
+}
+
+// =====================================================
+//  DRAW CAMERA
+// =====================================================
+function drawCamera() {
+  const s = S;
+  const cam = s.currentCam;
+  const blackout = s.phase === 3;
+
+  let bgKey = null;
+  if (!blackout) {
+    if (cam === 1) bgKey = "cam1_light";
+    else if (cam === 2) bgKey = "cam2_light";
+    else if (cam === 3) bgKey = "cam3_light";
+  } else {
+    if (cam === 1 && s.coinyFlickerT > 0) bgKey = "cam1_flicker";
+    else if (cam === 2 && s.coinyFlickerT > 0) bgKey = "cam2_flicker";
+    else if (cam === 3 && s.zapFlashT > 0) bgKey = "cam3_light";
+  }
+
+  if (bgKey && blit(bgKey, 0, 0, W, H)) {
+    // ok
+  } else if (bgKey === null) {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, W, H);
+  } else {
+    ctx.fillStyle = "#161616";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= 8; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * (W/8), 0);
+      ctx.lineTo(W/2 + (i - 4) * 80, H);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.6);
+    ctx.lineTo(W, H * 0.6);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "rgba(0,0,0,0.08)";
+  for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 2);
+
+  drawCamCharacters(cam);
+}
+
+function drawCamCharacters(cam) {
+  const s = S;
+  const camIndex = cam - 1;
+
+  if (cam === 1) {
+    const key = s.phase === 1 ? "coiny_p1" : "coiny_p23";
+    if (!blit(key, W/2 - 100, H/2 - 20, 200, 200)) {
+      drawCoinyShape(W/2, H/2 + 50, s.phase);
+    }
+  }
+
+  if (s.pencilBanishedT <= 0 && s.pencilPos < 3 && s.pencilPos === camIndex) {
+    const sx = W/2 - 200 + (s.pencilShockFlash > 0 ? rnd(-6, 6) : 0);
+    if (!blit("pencil_camera", sx - 100, H/2 - 180, 200, 340)) {
+      drawPencilShape(sx, H/2, 0.8);
+    }
+  }
+
+  if (s.phase >= 2 && s.leafyBanishedT <= 0 && s.leafyPos < 3 && s.leafyPos === camIndex) {
+    const sx = W/2 + 200;
+    if (!blit("leafy_camera", sx - 100, H/2 - 180, 200, 340)) {
+      drawLeafyShape(sx, H/2, 0.8);
+    }
+  }
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 28px 'Courier New'";
+  ctx.fillText("CAM " + cam, 30, 60);
+
+  if (s.phase === 3 && !S.coinyFlickerT && !S.zapFlashT) {
+    ctx.fillStyle = "rgba(0,0,0,0.85)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#444";
+    ctx.font = "24px 'Courier New'";
+    ctx.textAlign = "center";
+    ctx.fillText("▮ NO SIGNAL ▮", W/2, H/2);
+    ctx.textAlign = "left";
+  }
+}
+
+// =====================================================
+//  HUD
+// =====================================================
+function drawHUD() {
+  const s = S;
+  if (s.gameOver || s.won) return;
+
+  const bw = 520, bh = 26;
+  const bx = W/2 - bw/2, by = 24;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(bx - 3, by - 3, bw + 6, bh + 6);
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(bx, by, bw, bh);
+  const ePct = Math.max(0, Math.min(1, s.energy / CONFIG.STARTING_ENERGY));
+  let eColor = "#4a9a4a";
+  if (ePct < 0.5) eColor = "#b89a2a";
+  if (ePct < 0.25) eColor = "#b83a3a";
+  if (ePct < 0.1 && Math.floor(performance.now()/250) % 2 === 0) eColor = "#ff5050";
+  ctx.fillStyle = eColor;
+  ctx.fillRect(bx, by, bw * ePct, bh);
+  ctx.strokeStyle = "#444";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx, by, bw, bh);
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 14px 'Courier New'";
+  ctx.fillText("ENERGY  " + Math.ceil(s.energy), bx + 8, by + 18);
+
+  const ay = by + bh + 8;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(bx - 3, ay - 3, bw + 6, bh + 6);
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(bx, ay, bw, bh);
+  const aPct = s.air / CONFIG.AIR_MAX;
+  ctx.fillStyle = "#3a7ab8";
+  ctx.fillRect(bx, ay, bw * aPct, bh);
+  ctx.strokeStyle = "#444";
+  ctx.strokeRect(bx, ay, bw, bh);
+  ctx.fillStyle = "#fff";
+  ctx.fillText("AIR  " + Math.ceil(s.air), bx + 8, ay + 18);
+
+  const totalMin = Math.floor(s.gameTime / 60);
+  const hour = totalMin === 0 ? 12 : totalMin;
+  const clockStr = (hour === 0 ? 12 : hour) + ":00 AM";
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 34px 'Courier New'";
+  ctx.textAlign = "right";
+  ctx.fillText(clockStr, W - 30, 60);
+  ctx.fillStyle = "#888";
+  ctx.font = "16px 'Courier New'";
+  ctx.fillText("PHASE " + s.phase, W - 30, 90);
+  ctx.textAlign = "left";
+
+  ctx.font = "14px 'Courier New'";
+  ctx.fillStyle = "#aaa";
+  const ldm = s.leftDamage >= 3 ? "BROKEN" : "L" + s.leftDamage;
+  const rdm = s.rightDamage >= 3 ? "BROKEN" : "L" + s.rightDamage;
+  ctx.fillText("LEFT DOOR:  " + ldm + (s.leftClosed ? " [CLOSED]" : ""), 30, 60);
+  ctx.fillText("RIGHT DOOR: " + rdm + (s.rightClosed ? " [CLOSED]" : ""), 30, 82);
+  ctx.fillText("VENT: " + (s.ventSealed ? "SEALED" : "OPEN"), 30, 104);
+
+  // ---- CONTROLS HINT ----
+  ctx.fillStyle = "#555";
+  ctx.font = "13px 'Courier New'";
+  const hint = s.isCamOpen
+    ? "C = close cams   |   ← / → = switch cam   |   click a character to banish/reset"
+    : "C = cams   |   L-Shift / R-Shift = doors   |   X = vent   |   Z = left shock   |   ? = right shock";
+  ctx.fillText(hint, 30, H - 24);
+
+  if (s.msg && s.msgT > 0) {
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillRect(W/2 - 220, H - 110, 440, 48);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 18px 'Courier New'";
+    ctx.textAlign = "center";
+    ctx.fillText(s.msg, W/2, H - 80);
+    ctx.textAlign = "left";
+  }
+
+  if (s.penWarningT > 0) {
+    const pulse = Math.abs(Math.sin(performance.now() / 200));
+    ctx.fillStyle = "rgba(200, 0, 0, " + (0.15 + pulse * 0.25) + ")";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 42px 'Courier New'";
+    ctx.textAlign = "center";
+    ctx.fillText("▲ CHAINSAW ▲", W/2, 180);
+    ctx.font = "bold 22px 'Courier New'";
+    ctx.fillText("PRESS X TO SEAL VENT", W/2, 215);
+    ctx.textAlign = "left";
+  }
+
+  if (s.phase >= 2 && s.coinyExpRow >= 3 && s.coinyOffT <= 0) {
+    const pulse = Math.abs(Math.sin(performance.now() / 120));
+    ctx.fillStyle = "rgba(240, 140, 0, " + (0.1 + pulse * 0.15) + ")";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#ffb060";
+    ctx.font = "bold 22px 'Courier New'";
+    ctx.textAlign = "center";
+    ctx.fillText("COINY OVERHEATING (" + s.coinyExpRow + "/5)", W/2, 150);
+    ctx.textAlign = "left";
+  }
+
+  if (s.zapFlashT > 0) {
+    ctx.fillStyle = "rgba(200, 220, 255, " + (s.zapFlashT / 0.5 * 0.35) + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// =====================================================
+//  RENDER
+// =====================================================
+function render() {
+  if (!S) return;
+
+  ctx.save();
+  if (S.shakeT > 0) ctx.translate(rnd(-8, 8), rnd(-8, 8));
+
+  if (S.isCamOpen) drawCamera();
+  else drawOffice();
+
+  drawHUD();
+  ctx.restore();
+
+  if (S.gameOver) {
+    ctx.fillStyle = "rgba(60, 0, 0, 0.92)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 72px 'Courier New'";
+    ctx.fillText("GAME OVER", W/2, H/2 - 40);
+    ctx.font = "24px 'Courier New'";
+    ctx.fillStyle = "#f88";
+    ctx.fillText(S.msg || "You were caught.", W/2, H/2 + 30);
+    ctx.fillStyle = "#aaa";
+    ctx.font = "18px 'Courier New'";
+    ctx.fillText("Press R to try again   ·   Escape for menu", W/2, H/2 + 100);
+    ctx.textAlign = "left";
+  }
+
+  if (S.won) {
+    ctx.fillStyle = "rgba(0, 40, 0, 0.92)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 90px 'Courier New'";
+    ctx.fillText("6:00 AM", W/2, H/2 - 30);
+    ctx.font = "26px 'Courier New'";
+    ctx.fillStyle = "#9f9";
+    ctx.fillText("You survived the shift.", W/2, H/2 + 40);
+    ctx.fillStyle = "#aaa";
+    ctx.font = "18px 'Courier New'";
+    ctx.fillText("Press R to play again   ·   Escape for menu", W/2, H/2 + 110);
+    ctx.textAlign = "left";
+  }
+}
+
+// =====================================================
+//  SHOCK HELPER — called by Z (left) and ? (right)
+// =====================================================
+function tryShock(side) {
+  // Always costs energy + flashes the office (zap light in phase 3)
+  S.energy -= CONFIG.SHOCK_COST;
+  S.zapFlashT = 0.5;
+  S.zapSide = side;
+
+  // Can only actually shock Pencil if she's at the corresponding door
+  // AND (door closed OR door broken)
+  if (S.pencilPos === 3 && S.pencilSide === side) {
+    const closed = side === "left" ? S.leftClosed : S.rightClosed;
+    const dmg    = side === "left" ? S.leftDamage : S.rightDamage;
+    if (closed || dmg >= 3) {
+      S.pencilPos = 0; S.pencilMoveT = 0;
+      S.pencilDoorT = 0; S.pencilSide = null;
+      S.pencilShockFlash = 0.6;
+      setMsg("Shocked! Pencil retreated.", 1.2);
+    }
+  }
+}
+
+// =====================================================
+//  UPDATE
+// =====================================================
+function update(dt) {
+  const s = S;
+  s.gameTime += dt;
+
+  const newPhase = Math.min(3, Math.floor(s.gameTime / CONFIG.PHASE_LENGTH) + 1);
+  if (newPhase !== s.phase) {
+    s.phase = newPhase;
+    if (newPhase === 2) startSlideshow(2);
+    if (newPhase === 3) startSlideshow(3);
+  }
+
+  if (s.gameTime >= CONFIG.SHIFT_DURATION) {
+    s.won = true;
+    s.running = false;
+    return;
+  }
+
+  if (s.zapFlashT > 0)        s.zapFlashT        -= dt;
+  if (s.pencilShockFlash > 0) s.pencilShockFlash -= dt;
+  if (s.coinyFlickerT > 0)    s.coinyFlickerT    -= dt;
+  if (s.coinyFlashT > 0)      s.coinyFlashT      -= dt;
+  if (s.coinyOffT > 0)        s.coinyOffT        -= dt;
+  if (s.msgT > 0)             s.msgT             -= dt;
+  if (s.shakeT > 0)           s.shakeT           -= dt;
+  if (s.pencilBanishedT > 0)  s.pencilBanishedT  -= dt;
+  if (s.leafyBanishedT > 0)   s.leafyBanishedT   -= dt;
+
+  // Energy drain
+  let drain = 0;
+  if (s.leftClosed)  drain += CONFIG.DOOR_COST[Math.min(3, s.leftDamage)];
+  if (s.rightClosed) drain += CONFIG.DOOR_COST[Math.min(3, s.rightDamage)];
+  if (s.leftDamage === 3)  drain += 10;
+  if (s.rightDamage === 3) drain += 10;
+  if (s.isCamOpen) {
+    drain += CONFIG.CAMERA_COST;
+    if (s.phase === 3) drain += CONFIG.CAMS_LIGHT_P3;
+  }
+  if (s.phase >= 2 && s.coinyOffT <= 0) drain += CONFIG.COINY_LAPTOP;
+
+  s.energy -= drain * dt;
+  if (s.energy <= 0) { s.energy = 0; jumpScare("Out of energy."); return; }
+
+  // Air
+  if (s.ventSealed) {
+    s.air -= CONFIG.AIR_DRAIN * dt;
+    if (s.air < 0) s.air = 0;
+  } else {
+    s.air = Math.min(CONFIG.AIR_MAX, s.air + CONFIG.AIR_REFILL * dt);
+  }
+
+  // ============ PENCIL ============
+  if (s.pencilBanishedT <= 0) {
+    if (s.pencilPos < 3) {
+      s.pencilMoveT += dt;
+      if (s.pencilMoveT >= CONFIG.PENCIL_MOVE) {
+        s.pencilMoveT = 0;
+        s.pencilPos++;
+        if (s.pencilPos === 3) {
+          s.pencilSide = Math.random() < 0.5 ? "left" : "right";
+          s.pencilDoorT = 0;
+          setMsg("Pencil is at the " + s.pencilSide + " door!");
+        }
+      }
+    } else {
+      s.pencilDoorT += dt;
+      const closed = s.pencilSide === "left" ? s.leftClosed : s.rightClosed;
+      const dmg    = s.pencilSide === "left" ? s.leftDamage : s.rightDamage;
+      if (!closed && dmg < 3) {
+        if (s.pencilDoorT >= CONFIG.PENCIL_GRACE) {
+          jumpScare("Pencil got you.");
+          return;
+        }
+      } else {
+        const t = s.pencilDoorT;
+        if (t >= 7)      { jumpScare("Pencil broke through."); return; }
+        else if (t >= 6) { /* door just broke */ }
+        else if (t >= 5) { if (s.pencilSide==="left") s.leftDamage  = Math.max(s.leftDamage, 3);  else s.rightDamage = Math.max(s.rightDamage, 3); }
+        else if (t >= 4) { if (s.pencilSide==="left") s.leftDamage  = Math.max(s.leftDamage, 2);  else s.rightDamage = Math.max(s.rightDamage, 2); }
+        else if (t >= 3) { if (s.pencilSide==="left") s.leftDamage  = Math.max(s.leftDamage, 1);  else s.rightDamage = Math.max(s.rightDamage, 1); }
+      }
+    }
+  }
+
+  // ============ LEAFY ============
+  if (s.phase >= 2 && s.leafyBanishedT <= 0) {
+    if (s.leafyPos < 3) {
+      s.leafyMoveT += dt;
+      if (s.leafyMoveT >= CONFIG.LEAFY_MOVE) {
+        s.leafyMoveT = 0;
+        s.leafyPos++;
+        if (s.leafyPos === 3) {
+          s.leafySide = Math.random() < 0.5 ? "left" : "right";
+          s.leafyDoorT = 0;
+        }
+      }
+    } else {
+      s.leafyDoorT += dt;
+      const closed = s.leafySide === "left" ? s.leftClosed : s.rightClosed;
+      const grace = s.phase === 3 ? CONFIG.LEAFY_GRACE_P3 : CONFIG.LEAFY_GRACE_P2;
+      if (closed) {
+        s.leafyPos = 0; s.leafyMoveT = 0; s.leafyDoorT = 0; s.leafySide = null;
+      } else if (s.leafyDoorT >= grace) {
+        jumpScare("Leafy got you.");
+        return;
+      }
+    }
+  }
+
+  // ============ COINY ============
+  if (s.phase >= 2 && s.coinyOffT <= 0) {
+    s.coinyExpT += dt;
+    const interval = rnd(CONFIG.COINY_MIN_EXP, CONFIG.COINY_MAX_EXP);
+    if (s.coinyExpT >= interval) {
+      s.coinyExpT = 0;
+      s.coinyExpRow++;
+      s.energy -= CONFIG.EXPLOSION_COST;
+      s.coinyFlashT = 0.2;
+      s.shakeT = 0.15;
+      setMsg("💥 Explosion! (" + s.coinyExpRow + "/5)", 0.8);
+      if (s.coinyExpRow >= CONFIG.COINY_MAX_ROW) {
+        jumpScare("Coiny blew up the office.");
+        return;
+      }
+    }
+  }
+
+  if (s.phase === 3 && s.coinyFlickerT <= 0) {
+    if (Math.random() < dt * 0.9) s.coinyFlickerT = rnd(0.35, 0.9);
+  }
+
+  // ============ PEN ============
+  if (s.penWarningT > 0) {
+    s.penWarningT -= dt;
+    if (s.ventSealed) {
+      s.penSealedT += dt;
+      if (s.penSealedT >= CONFIG.PEN_LEAVE) {
+        s.penWarningT = 0;
+        s.penSealedT = 0;
+        s.penTimer = rnd(...CONFIG.PEN_INTERVAL[s.phase]);
+        s.ventSealed = false;
+        setMsg("Pen retreated.", 1.5);
+      }
+    } else {
+      s.penSealedT = 0;
+      if (s.penWarningT <= 0) {
+        jumpScare("Pen got you.");
+        return;
+      }
+    }
+  } else {
+    s.penTimer -= dt;
+    if (s.penTimer <= 0) {
+      s.penWarningT = CONFIG.PEN_WARNING;
+      s.penTimer = rnd(...CONFIG.PEN_INTERVAL[s.phase]);
+      setMsg("⚠ Chainsaw! Seal the vent!", 1.5);
+    }
+  }
+}
+
+// =====================================================
+//  MAIN LOOP
+// =====================================================
+let lastT = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  if (S && S.running && !S.paused && !S.gameOver && !S.won) {
+    update(dt);
+  } else if (S && S.shakeT > 0) {
+    S.shakeT -= dt;
+  }
+  render();
+}
+
+// =====================================================
+//  INPUT — NEW CONTROL SCHEME
+// =====================================================
+document.addEventListener("keydown", (e) => {
+  if (!S) return;
+
+  if (e.code === "Escape") {
+    S.running = false;
+    document.getElementById("menuScreen").style.display = "flex";
+    return;
+  }
+
+  if (S.gameOver || S.won) {
+    if (e.key === "r" || e.key === "R") startGame();
+    return;
+  }
+  if (S.paused) return;
+
+  switch (e.code) {
+    // C — cameras
+    case "KeyC": {
+      const was = S.isCamOpen;
+      S.isCamOpen = !S.isCamOpen;
+      S.energy -= CONFIG.CAM_SWAP_COST;
+      if (was && !S.isCamOpen) {
+        // forced Pencil move on camera close
+        if (S.pencilBanishedT <= 0 && S.pencilPos < 3) {
+          S.pencilPos++;
+          S.pencilMoveT = 0;
+          if (S.pencilPos === 3) {
+            S.pencilSide = Math.random() < 0.5 ? "left" : "right";
+            S.pencilDoorT = 0;
+          }
+        }
+      }
+      break;
+    }
+
+    // Arrow keys — switch cameras (only while cameras open)
+    case "ArrowLeft":
+      if (S.isCamOpen) S.currentCam = Math.max(1, S.currentCam - 1);
+      break;
+    case "ArrowRight":
+      if (S.isCamOpen) S.currentCam = Math.min(3, S.currentCam + 1);
+      break;
+
+    // L-Shift / R-Shift — doors
+    case "ShiftLeft":
+      if (S.leftDamage < 3) S.leftClosed = !S.leftClosed;
+      break;
+    case "ShiftRight":
+      if (S.rightDamage < 3) S.rightClosed = !S.rightClosed;
+      break;
+
+    // X — vent
+    case "KeyX":
+      S.ventSealed = !S.ventSealed;
+      if (!S.ventSealed) S.penSealedT = 0;
+      break;
+
+    // Z — left shock
+    case "KeyZ":
+      tryShock("left");
+      break;
+
+    // ? — right shock (Slash key, Shift+/ = ?)
+    case "Slash":
+      tryShock("right");
+      break;
+  }
+});
+
+// Click on canvas — banish/reset on cameras
+canvas.addEventListener("click", (e) => {
+  if (!S || !S.running || S.paused || !S.isCamOpen) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
+
+  if (S.currentCam === 1 && mx > W/2 - 120 && mx < W/2 + 120 && my > H/2 - 40 && my < H/2 + 160) {
+    S.coinyOffT = CONFIG.COINY_OFF;
+    S.coinyExpRow = 0;
+    S.coinyExpT = 0;
+    setMsg("Coiny's laptop shut off! (" + CONFIG.COINY_OFF + "s)", 1.5);
+    return;
+  }
+
+  const camIndex = S.currentCam - 1;
+
+  if (S.pencilBanishedT <= 0 && S.pencilPos < 3 && S.pencilPos === camIndex) {
+    if (mx > W/2 - 300 && mx < W/2 - 100 && my > H/2 - 200 && my < H/2 + 200) {
+      S.pencilBanishedT = CONFIG.PENCIL_BANISH;
+      setMsg("Pencil banished for " + CONFIG.PENCIL_BANISH + "s!", 1.2);
+      return;
+    }
+  }
+
+  if (S.phase >= 2 && S.leafyBanishedT <= 0 && S.leafyPos < 3 && S.leafyPos === camIndex) {
+    if (mx > W/2 + 100 && mx < W/2 + 300 && my > H/2 - 200 && my < H/2 + 200) {
+      S.leafyBanishedT = CONFIG.LEAFY_BANISH;
+      setMsg("Leafy banished for " + CONFIG.LEAFY_BANISH + "s!", 1.2);
+      return;
+    }
+  }
+});
+
+// =====================================================
+//  SLIDESHOWS — updated with new controls
+// =====================================================
+const SLIDES = {
+  1: [
+    { t: "FIVE NIGHTS AT YOYLE CITY", d: "Night 1 — Pizza Women" },
+    { t: "PENCIL", d: "Moves through the cameras. When she reaches a door, close it within 2s. Once shut, shock her with Z (left door) or ? (right door). Click her on a camera feed to banish her for 5s." },
+    { t: "LEAFY", d: "Arrives in Phase 2. Completely silent. Close the door to send her back instantly. Click her on a camera feed to banish her for 7s." },
+    { t: "PEN", d: "Crawls the vents. When you hear the chainsaw, press X within 3s. Air only lasts 3 seconds when sealed — reopen the vent as soon as he leaves." },
+    { t: "COINY", d: "Sits in CAM 1. From Phase 2 on, his laptop explodes every ~1 second. Click him to reset. Five explosions in a row and you're done." },
+    { t: "CONTROLS", d: "C = open/close cameras\n← / → = switch camera\nLeft Shift = left door\nRight Shift = right door\nZ = left shock\n? = right shock\nX = toggle vent\nClick a character on camera to banish or reset.\n\nSurvive until 6:00 AM." },
+  ],
+  2: [
+    { t: "2:00 AM", d: "Leafy is now active.\n\nCoiny's laptop starts exploding every ~1 second.\n\nWatch the cameras. Manage your energy." },
+    { t: "REMINDERS", d: "· Shocks cost 10 energy — Z for left, ? for right\n· Only works on Pencil, and only when her door is closed or broken\n· Clicking Coiny resets his explosion counter\n· Leafy is completely silent — check your cameras." },
+  ],
+  3: [
+    { t: "4:00 AM", d: "BLACKOUT\n\nThe office lights are gone. Cameras barely work." },
+    { t: "SEEING IN THE DARK", d: "· CAM 1 & CAM 2 flicker with Coiny's flashlight\n· CAM 3 is pitch black\n· Press Z or ? to briefly light the office — but it costs 10 energy\n· Rely on sound. Watch your energy." },
+  ],
+};
+
+let slideshowPhase = null;
+let slideIndex = 0;
+
+function startSlideshow(phase) {
+  slideshowPhase = phase;
+  slideIndex = 0;
+  S.paused = true;
+  document.getElementById("slideScreen").style.display = "flex";
+  renderSlide();
+}
+
+function renderSlide() {
+  const slides = SLIDES[slideshowPhase];
+  if (slideIndex >= slides.length) { endSlideshow(); return; }
+  const s = slides[slideIndex];
+  document.getElementById("slideTitle").textContent = s.t;
+  document.getElementById("slideText").textContent = s.d;
+  document.getElementById("slideBtn").textContent =
+    (slideIndex === slides.length - 1) ? "BEGIN" : "NEXT";
+}
+
+document.getElementById("slideBtn").addEventListener("click", () => {
+  slideIndex++;
+  renderSlide();
+});
+
+function endSlideshow() {
+  document.getElementById("slideScreen").style.display = "none";
+  S.paused = false;
+}
+
+// =====================================================
+//  MENU
+// =====================================================
+const NIGHTS = [
+  { id: 1, title: "Pizza Women",          playable: true  },
+  { id: 2, title: "Welcome, Newbies!",    playable: false },
+  { id: 3, title: "Alternate Universes",  playable: false },
+  { id: 4, title: "Escape",               playable: false },
+  { id: 5, title: "Finale",               playable: false },
+];
+
+function buildMenu() {
+  const grid = document.getElementById("nightGrid");
+  NIGHTS.forEach(n => {
+    const b = document.createElement("button");
+    b.className = "nightBtn";
+    b.innerHTML = `NIGHT ${n.id}<span class="nTitle">${n.title}</span>` +
+                  (n.playable ? "" : `<span class="nStatus">COMING SOON</span>`);
+    if (n.playable) {
+      b.addEventListener("click", () => {
+        document.getElementById("menuScreen").style.display = "none";
+        startGame();
+      });
+    } else {
+      b.disabled = true;
+    }
+    grid.appendChild(b);
+  });
+}
+
+// =====================================================
+//  START
+// =====================================================
+function startGame() {
+  S = newState();
+  S.running = true;
+  S.penTimer = rnd(...CONFIG.PEN_INTERVAL[1]);
+  lastT = performance.now();
+  startSlideshow(1);
+}
+
+buildMenu();
+ctx.fillStyle = "#000";
+ctx.fillRect(0, 0, W, H);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
